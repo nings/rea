@@ -145,6 +145,20 @@ describe("DOS MZ load-module validation", () => {
 });
 
 describe("MZ Windows header observations", () => {
+  it.each(["PE", "NE", "LE", "LX"])(
+    "does not mask high bits in %s signature candidates",
+    (signature) => {
+      for (const index of [0, 1]) {
+        const bytes = dosMz(64);
+        const offset = 32;
+        bytes.writeUInt32LE(offset, 60);
+        bytes.write(`${signature}\0\0`, offset, "latin1");
+        bytes[offset + index] = bytes[offset + index]! | 0x80;
+        expect(observeMzWindowsHeader(bytes)).toEqual({ state: "absent" });
+      }
+    },
+  );
+
   it.each(["NE", "LE", "LX"])(
     "distinguishes unsupported %s from DOS",
     (signature) => {

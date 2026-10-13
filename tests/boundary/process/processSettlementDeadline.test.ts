@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { describe, expect, it } from "vitest";
 import { observeSettlement } from "../../../src/process/capture/ProcessCaptureLifecycle.js";
 import { observeOwnedProcessGroups } from "../../../src/process/ProcessOwnershipObservation.js";
@@ -29,11 +30,18 @@ describe("settlement deadline classification", () => {
     const runId = "settlement-live-group";
     // A detached child leads its own process group and carries the run token,
     // so the group observes as a genuinely owned live member.
-    const child = spawn("sleep", ["30"], {
-      detached: true,
-      stdio: "ignore",
-      env: { ...process.env, REA_PROCESS_RUN_ID: runId },
-    });
+    // macOS withholds environment observations for platform binaries such as
+    // /bin/sleep; Node exposes the run token needed to prove ownership.
+    const child = spawn(
+      process.execPath,
+      ["-e", "setTimeout(() => {}, 30_000)"],
+      {
+        detached: true,
+        stdio: "ignore",
+        env: { ...process.env, REA_PROCESS_RUN_ID: runId },
+      },
+    );
+    await once(child, "spawn");
     child.unref();
     try {
       // Wait until the child is actually listed before asserting on it.
@@ -56,7 +64,9 @@ describe("settlement deadline classification", () => {
       );
       expect(settlement.state).toBe("alive_at_deadline");
     } finally {
+      const exited = once(child, "exit");
       child.kill("SIGKILL");
+      await exited;
     }
   });
 

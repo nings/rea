@@ -348,8 +348,10 @@ export class NativeDmgArtifactReader implements ArtifactReader {
   }
 
   async #attach(signal?: AbortSignal): Promise<void> {
-    await runChecked(this.host, ["verify", this.path], signal);
-    this.#provenance.push(command(["verify", this.path], ["read"]));
+    // Verbose diagnostics include the numeric DiskImages result, whereas the
+    // failure description follows macOS preferences rather than LANG/LC_ALL.
+    await runChecked(this.host, ["verify", "-verbose", this.path], signal);
+    this.#provenance.push(command(["verify", "-verbose", this.path], ["read"]));
     const baseline = await this.#readInfo();
     this.#baselineDevices = new Set(
       baseline.images.flatMap((image) =>
@@ -620,35 +622,38 @@ const commandFailureReason = (
 const verifyFailureReason = (
   cause: unknown,
 ): ArtifactReaderFailure["reason"] => {
-  const diagnostic = verifyFailureDiagnostic(
+  const result = verifyFailureResult(
     processOutput(cause, "stdout"),
     processOutput(cause, "stderr"),
   );
-  switch (diagnostic) {
-    case "image not recognized":
+  switch (result) {
+    // DiskImages results observed from malformed and checksum-mismatched UDIFs.
+    case 111:
       return "format";
-    case "invalid checksum":
-    case "image data corrupted":
+    case 117:
       return "integrity";
-    case "No such file or directory":
-    case "Permission denied":
-    case "Input/output error":
+    // BSD errno results: ENOENT, EACCES and EIO.
+    case 2:
+    case 13:
+    case 5:
       return "io";
     default:
       return "unavailable";
   }
 };
 
-const verifyFailureDiagnostic = (
+const verifyFailureResult = (
   stdout: string,
   stderr: string,
-): string | undefined => {
-  const prefix = "hdiutil: verify failed - ";
-  return `${stdout}\n${stderr}`
-    .split(/\r?\n/u)
-    .map((line) => line.trim())
-    .find((line) => line.startsWith(prefix))
-    ?.slice(prefix.length);
+): number | undefined => {
+  const results = [
+    ...`${stdout}\n${stderr}`.matchAll(
+      /^hdiutil: verify: result: ([0-9]+)\r?$/gmu,
+    ),
+  ];
+  if (results.length !== 1) return undefined;
+  const result = Number(results[0]?.[1]);
+  return Number.isSafeInteger(result) ? result : undefined;
 };
 
 const command = (

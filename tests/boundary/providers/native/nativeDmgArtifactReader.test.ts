@@ -62,6 +62,18 @@ const entryPaths = async (
   return paths;
 };
 
+const expectCapturedCommandOutput = (failure: ArtifactReaderFailure): void => {
+  expect(failure.cause).toBeInstanceOf(Error);
+  if (!(failure.cause instanceof Error)) return;
+  const evidence: unknown = JSON.parse(
+    failure.message.slice(failure.message.indexOf("{")),
+  );
+  expect(evidence).toMatchObject({
+    stdout: Reflect.get(failure.cause, "stdout"),
+    stderr: Reflect.get(failure.cause, "stderr"),
+  });
+};
+
 const infoPlist = (
   imagePath: string,
   entities: { "dev-entry": string; "mount-point"?: string }[],
@@ -615,7 +627,7 @@ describe("native DMG artifact reader", () => {
     Reflect.set(first, "tool", "forged");
     expect(reader.provenance()[0]?.tool).toBe("/usr/bin/hdiutil");
     await reader.close();
-    expect(calls).toContainEqual(["verify", "/tmp/image.dmg"]);
+    expect(calls).toContainEqual(["verify", "-verbose", "/tmp/image.dmg"]);
     expect(calls).toContainEqual(["detach", "/dev/disk-fixture"]);
   });
 
@@ -625,14 +637,15 @@ describe("native DMG artifact reader", () => {
         run: () =>
           Promise.resolve({
             stdout: "verify output",
-            stderr: "hdiutil: verify failed - image not recognized",
+            stderr:
+              "hdiutil: verify: result: 111\nhdiutil: verify failed - image not recognized",
             exitCode: 1,
           }),
       }),
     ).rejects.toMatchObject({
       reason: "format",
       message: expect.stringMatching(
-        /"arguments":\["verify","\/tmp\/image\.dmg"\].*"exitCode":1.*"stderr":"hdiutil: verify failed - image not recognized"/u,
+        /"arguments":\["verify","-verbose","\/tmp\/image\.dmg"\].*"exitCode":1.*"stdout":"verify output".*"stderr":"hdiutil: verify: result: 111\\nhdiutil: verify failed - image not recognized"/u,
       ),
     });
   });
@@ -1082,6 +1095,47 @@ describe("native DMG command failure diagnostics", () => {
 });
 
 describe("native DMG command diagnostics", () => {
+  it.each([
+    "hdiutil: verify failed - invalid checksum\n",
+    "hdiutil: verify: result: 117suffix\n",
+    "hdiutil: verify: result: 111\nhdiutil: verify: result: 117\n",
+  ])(
+    "keeps missing or ambiguous numeric verify results unknown: %j",
+    async (stderr) => {
+      await expect(
+        createAttachedReader("/tmp/image.dmg", process.env, undefined, {
+          run: () => Promise.resolve({ stdout: "", stderr, exitCode: 1 }),
+        }),
+      ).rejects.toMatchObject({ reason: "unavailable" });
+    },
+  );
+
+  it.each([
+    { result: 111, reason: "format" },
+    { result: 117, reason: "integrity" },
+    { result: 2, reason: "io" },
+    { result: 13, reason: "io" },
+    { result: 5, reason: "io" },
+    { result: 999, reason: "unavailable" },
+  ])(
+    "classifies verify result $result independently of diagnostic language",
+    async ({ result, reason }) => {
+      const stderr = `hdiutil: verify: result: ${String(result)}\nhdiutil: verify failed - 本地化診斷\n`;
+      const failure = await createAttachedReader(
+        "/tmp/image.dmg",
+        process.env,
+        undefined,
+        {
+          run: () => Promise.resolve({ stdout: "", stderr, exitCode: 1 }),
+        },
+      ).catch((cause: unknown) => cause);
+      expect(failure).toMatchObject({ reason });
+      expect(failure).toBeInstanceOf(ArtifactReaderFailure);
+      if (!(failure instanceof ArtifactReaderFailure)) return;
+      expect(failure.message).toContain("本地化診斷");
+    },
+  );
+
   it("keeps unknown attach failures unavailable with command evidence", async () => {
     await expect(
       createAttachedReader("/tmp/image.dmg", process.env, undefined, {
@@ -1135,7 +1189,8 @@ describe("native DMG command diagnostics", () => {
         run: () =>
           Promise.resolve({
             stdout: "",
-            stderr: "hdiutil: verify failed - Input/output error\n",
+            stderr:
+              "hdiutil: verify: result: 5\nhdiutil: verify failed - Input/output error\n",
             exitCode: 1,
           }),
       }),
@@ -1149,13 +1204,14 @@ describe("native DMG command diagnostics", () => {
         run: () =>
           Promise.resolve({
             stdout: "checksum output",
-            stderr: "hdiutil: verify failed - image data corrupted\n",
+            stderr:
+              "hdiutil: verify: result: 117\nhdiutil: verify failed - invalid checksum\n",
             exitCode: 1,
           }),
       }),
     ).rejects.toMatchObject({
       reason: "integrity",
-      message: expect.stringContaining("image data corrupted"),
+      message: expect.stringContaining("invalid checksum"),
     });
   });
 
@@ -1205,10 +1261,11 @@ describe("native DMG real verification diagnostics", () => {
       expect(failure).toBeInstanceOf(ArtifactReaderFailure);
       if (!(failure instanceof ArtifactReaderFailure)) return;
       expect(failure.reason).toBe("format");
+      expectCapturedCommandOutput(failure);
       expect(failure.message).toContain('"command":"/usr/bin/hdiutil"');
       expect(failure.message).toContain('"arguments":["verify"');
       expect(failure.message).toContain('"exitCode":1');
-      expect(failure.message).toContain('"stdout":""');
+      expect(failure.message).toContain('"stdout":"');
       expect(failure.message).toContain('"stderr":"');
     },
   );
@@ -1222,9 +1279,9 @@ describe("native DMG real verification diagnostics", () => {
       await writeFile(unreadablePath, "not a disk image\n");
       await chmod(unreadablePath, 0);
       try {
-        for (const [path, expectedDiagnostic] of [
-          [missingPath, "No such file or directory"],
-          [unreadablePath, "Permission denied"],
+        for (const [path, expectedResult] of [
+          [missingPath, 2],
+          [unreadablePath, 13],
         ] as const) {
           const failure = await createAttachedReader(path, process.env).catch(
             (cause: unknown) => cause,
@@ -1232,16 +1289,19 @@ describe("native DMG real verification diagnostics", () => {
           expect(failure).toBeInstanceOf(ArtifactReaderFailure);
           if (!(failure instanceof ArtifactReaderFailure)) continue;
           expect(failure.reason).toBe("io");
+          expectCapturedCommandOutput(failure);
           expect(failure.message).toContain('"command":"/usr/bin/hdiutil"');
           expect(failure.message).toContain('"arguments":["verify"');
           expect(failure.message).toContain('"exitCode":1');
-          expect(failure.message).toContain('"stdout":""');
-          expect(failure.message).toContain(expectedDiagnostic);
+          expect(failure.message).toContain('"stdout":"');
+          expect(failure.message).toContain(
+            `hdiutil: verify: result: ${String(expectedResult)}`,
+          );
           expect(failure.cause).toBeInstanceOf(Error);
           if (!(failure.cause instanceof Error)) continue;
           expect(Reflect.get(failure.cause, "code")).toBe(1);
           expect(Reflect.get(failure.cause, "stderr")).toContain(
-            expectedDiagnostic,
+            `hdiutil: verify: result: ${String(expectedResult)}`,
           );
         }
       } finally {
@@ -1304,12 +1364,12 @@ describe("native DMG real verification diagnostics", () => {
       expect(failure).toBeInstanceOf(ArtifactReaderFailure);
       if (!(failure instanceof ArtifactReaderFailure)) return;
       expect(failure.reason).toBe("integrity");
+      expectCapturedCommandOutput(failure);
       expect(failure.message).toContain('"command":"/usr/bin/hdiutil"');
       expect(failure.message).toContain('"arguments":["verify"');
       expect(failure.message).toContain('"exitCode":1');
-      expect(failure.message).toContain("calculated CRC32");
-      expect(failure.message).toContain("expected   CRC32");
-      expect(failure.message).toContain("verify failed - invalid checksum");
+      expect(failure.message).toContain("CRC32");
+      expect(failure.message).toContain("hdiutil: verify: result: 117");
       expect(failure.cause).toBeInstanceOf(Error);
       if (!(failure.cause instanceof Error)) return;
       expect(Reflect.get(failure.cause, "code")).toBe(1);

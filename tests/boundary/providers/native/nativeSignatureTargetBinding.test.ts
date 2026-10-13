@@ -396,7 +396,7 @@ it.skipIf(process.platform !== "darwin")(
       ]);
     }
     const target = await nativeMachoTargetForFile(path);
-    const real = new XcrunCommandRunner({});
+    const real = new XcrunCommandRunner(process.env);
     let capturedPath: string | undefined;
     const runner: NativeCommandRunner = {
       async run(tool, args, options) {
@@ -417,11 +417,11 @@ it.skipIf(process.platform !== "darwin")(
     const result = await new NativeMacOSProvider({}, runner, "darwin")
       .createClient(target)
       .execute("inspect_signature", {});
-    expect(result.ok && result.value.result).toMatchObject({
+    if (!result.ok) throw result.error;
+    expect(result.value.result).toMatchObject({
       signed: true,
       identifier: "rea.original",
     });
-    if (!result.ok) throw result.error;
     expect(
       inspectSignatureSchema
         .parse(result.value.result)
