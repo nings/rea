@@ -64,6 +64,7 @@ export default defineConfig({
         collapsed: true,
         items: [
           { text: "MCP contracts", link: "/mcp-contracts" },
+          { text: "架构与 MCP 调用流程", link: "/architecture-zh" },
           { text: "Tool design", link: "/tool-design" },
           { text: "Testing", link: "/testing" },
           { text: "Client verification", link: "/client-verification" },

@@ -61,6 +61,8 @@ For runtime instrumentation, see the [Frida guide](./frida-instrumentation.md).
 
 For development, use [testing](testing.md), [client verification](client-verification.md),
 [tool design](tool-design.md), and [releasing](releasing.md).
+The [Chinese architecture guide](architecture-zh.md) explains the module layers,
+MCP tool-call flow, and Evidence lifecycle with diagrams and source references.
 [Reconstruction readiness](reconstruction-readiness.md) describes a development
 conformance verifier. [The 6.2 migration](migration-6.2.md) records that release's
 compatibility changes; [the roadmap](roadmap.md) tracks future work.

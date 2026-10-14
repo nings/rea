@@ -1,0 +1,36 @@
+flowchart TB
+    entry["命令分派<br/>scripts/rea.mjs"]
+    cli["CLI 适配器<br/>src/cli.ts"]
+    main["MCP 启动与关闭<br/>src/main.ts · src/main/"]
+    composition["运行时装配<br/>src/composition/"]
+    server["MCP 工具适配器<br/>src/server/"]
+    contracts["工具输入输出契约<br/>src/contracts/"]
+    application["共享分析工作流<br/>src/application/"]
+    domain["事实、图、错误与 Evidence<br/>src/domain/"]
+    adapters["文件读取与分析提供方<br/>src/artifacts/ · src/hopper/ · src/ghidra/ · src/ida/ 等"]
+    process["子进程监督与身份<br/>src/process/"]
+    session["会话、活动目标与证据账本<br/>BinarySession · EvidenceLedger"]
+
+    entry -->|普通命令| cli
+    entry -->|mcp 或 --mcp| main
+    cli -.->|创建共享会话| composition
+    main -.->|创建共享会话| composition
+    main -->|启动 stdio| server
+    composition -.->|装配提供方| adapters
+    composition -.->|装配会话| session
+    cli -->|调用| application
+    server -->|绑定及校验| contracts
+    server -->|调用| application
+    server -->|准入及记录| session
+    application -->|生成和验证| domain
+    application -->|通过端口读取或分析| adapters
+    session -->|留存 Evidence| domain
+    adapters -->|需要子进程时使用| process
+
+    %% 实线为运行时调用或数据关系，虚线为装配关系；不是完整 import 图。
+    classDef entrypoint fill:#e0f2fe,stroke:#0369a1,color:#0c4a6e
+    classDef core fill:#dcfce7,stroke:#15803d,color:#14532d
+    classDef boundary fill:#fef3c7,stroke:#b45309,color:#78350f
+    class entry,cli,main,server entrypoint
+    class application,domain,contracts,session core
+    class composition,adapters,process boundary

@@ -1,0 +1,36 @@
+sequenceDiagram
+    autonumber
+    actor codex as Codex
+    participant mcp as MCP 适配器
+    participant app as JS 应用工作流
+    participant worker as 文件读取与 worker
+    participant ledger as EvidenceLedger
+
+    codex->>mcp: tools/call：analyze_javascript_application
+    mcp->>mcp: SDK 校验输入；工具处理器申请会话准入
+    Note over mcp,app: SDK、server、delivery 合并展示；JS 静态分析无需 open_binary
+    mcp->>app: 已校验输入、取消信号、进度报告器
+    app->>worker: 选择文件，解析并重建图
+    worker-->>app: 图、源码位置、覆盖与限制
+    app->>app: 验证结果并生成完整 Evidence
+
+    alt 分析成功
+        app-->>mcp: Result.ok（完整 Evidence）
+        opt detail = summary
+            mcp->>app: summarizeRetainedAnalysis
+            app->>ledger: 先留存完整 Evidence
+            app->>app: inspectAnalysisViewValidated 创建摘要
+            app-->>mcp: 摘要 Evidence（含 parent_evidence_id）
+        end
+        mcp->>ledger: 记录将要返回的 Evidence
+        mcp-->>codex: JSON 文本 + structuredContent
+    else 分析失败或取消
+        app-->>mcp: Result.err（可能含部分 Evidence）
+        opt 存在部分 Evidence
+            mcp->>ledger: 留存部分观察
+        end
+        mcp-->>codex: isError = true；错误文本
+    end
+    Note over codex,ledger: 摘要的 parent_evidence_id 可供 inspect_analysis_view 或证据导出使用
+    Note over mcp,ledger: 留存失败返回错误；响应超预算返回约束错误及可用恢复引用，不截断分析
+    Note over mcp,app: 需要活动目标的原生深度分析另走 open_binary 与 provider 路由；会话准入失败可直接返回错误
