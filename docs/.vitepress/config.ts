@@ -16,6 +16,7 @@ export default defineConfig({
       {
         text: "Getting started",
         items: [
+          { text: "中文快速开始", link: "/quick-start-zh" },
           { text: "Installation and setup", link: "/installation" },
           { text: "Client configuration", link: "/client-configuration" },
           { text: "CLI and Evidence", link: "/cli" },

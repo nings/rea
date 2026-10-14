@@ -43,6 +43,9 @@ npx -y rea-agents@latest analyze-javascript-application /absolute/path/to/app --
 
 See [installation and setup](./installation.md) for requirements and configuration.
 
+[中文快速开始](./quick-start-zh.md) covers a local build, Codex MCP setup,
+and a first static analysis example.
+
 For runtime instrumentation, see the [Frida guide](./frida-instrumentation.md).
 
 ## Choose a guide
